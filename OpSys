@@ -1,0 +1,1848 @@
+import java.io.*;
+import java.util.*;
+import java.time.*;
+
+public class OpSys extends Thread implements Runnable {
+	public static class proc{
+        private String name;
+		private int AT;
+		private int ST;
+		private int DIOT;
+		private int DIOA[];
+		private int ex;
+		private int stStore;
+		private int diotStore;
+		private int numOfIO = 0;
+		private int waitStamp;
+		private boolean firstResponse = true;
+		private int FT;
+		
+		proc(String n, int a, int s, int d1, int[] d2){
+			name = n;
+			AT = a;
+			ST = s;
+			DIOT = d1;
+			DIOA = d2;
+		}
+		
+		proc(String n, int a, int s, int d1, int[] d2, int exTime){
+			name = n;
+			AT = a;
+			ST = s;
+			DIOT = d1;
+			DIOA = d2;
+			ex = exTime;
+		}
+	}
+	
+	private static Comparator<proc> ATComp = new Comparator<proc>() {
+	    public int compare(proc p1, proc p2) {
+	      return Integer.compare(p1.AT, p2.AT);
+	    }
+	  };
+	  
+	public static int getRandNum(int min, int max) {
+		   return (int) ((Math.random() * (max - min)) + min);
+	}
+	
+	public static int findMinIndex(Queue<proc> qSRT, int srtIndex) {
+		int minIndex = -1;
+		int minValue = Integer.MAX_VALUE;
+		int s = qSRT.size();
+		for (int i = 0; i < s; i++) {
+			proc current = qSRT.peek();
+			qSRT.poll();
+			if (current.ST <= minValue && i <= srtIndex) {
+				minIndex = i;
+				minValue = current.ST;
+				}
+			qSRT.add(current);
+			}
+		return minIndex;
+	}
+	
+	public static int hrrnIndex(Queue<proc> qHRRN, int hrrnIndex, int CT) {
+		int maxIndex = -1;
+		double maxValue = 1;
+		int s = qHRRN.size();
+		int W;
+		int S;
+		//int EX;
+		double rRatio;
+		for (int i = 0; i < s; i++) {
+			proc current = qHRRN.peek();
+			qHRRN.poll();
+			W = CT - current.waitStamp;
+			//EX = current.ex;
+			//S = current.ST + current.ex;
+			S = current.stStore;
+			rRatio = (double) ((W+S)/S);
+			if (rRatio >= maxValue && i <= hrrnIndex) {
+				maxIndex = i;
+				maxValue = rRatio;
+				}
+			qHRRN.add(current);
+			}
+		return maxIndex;
+	}
+	
+	public static void selectToRear(Queue<proc> qSRT, int index) {
+		proc selectProc = qSRT.peek();
+		int s = qSRT.size();
+		for (int i = 0; i < s; i++) {
+			proc current = qSRT.peek();
+			qSRT.poll();
+			if (i != index) {
+				qSRT.add(current);
+			}
+			else {
+				selectProc = current;
+
+			}
+		}
+		qSRT.add(selectProc);
+	}
+	
+	public static void sortHrrn(Queue<proc> qSRT, int CT) {
+		for(int i = 1; i <= qSRT.size(); i++) {
+			int maxIndex = hrrnIndex(qSRT,qSRT.size() - i, CT);
+			selectToRear(qSRT, maxIndex);
+		}
+	}
+	
+	public static void sortSRT(Queue<proc> qSRT) {
+		for(int i = 1; i <= qSRT.size(); i++) {
+			int minIndex = findMinIndex(qSRT,qSRT.size() - i);
+			selectToRear(qSRT, minIndex);
+		}
+	}
+	
+	private static void fcfs(ArrayList<proc> processes) throws InterruptedException {
+		Collections.sort(processes, ATComp);
+		
+		
+		int currentTime = 0;
+	    Queue<proc> queue = new LinkedList<>();
+	    for (proc p : processes) {
+	    	p.ex = 0;
+	    	p.stStore = p.ST;
+	    	p.diotStore = p.DIOT;
+	    	queue.offer(p);
+	    }
+		
+	    Queue<proc> readyQ = new LinkedList<>();
+	    Queue<proc> IOQ = new LinkedList<>();
+	    Queue<proc> completedQ = new LinkedList<>();
+	    Queue<proc> executionQ = new LinkedList<>();
+	    
+	    int totalExecutionTime = 0;
+	    int totalTurnaroundTime = 0;
+	    int totalResponseTime = 0;
+	    int numProcesses = processes.size();
+	    
+	    	while (!queue.isEmpty()) {
+	    		
+	    		if(queue.peek().AT <= currentTime) {	    			
+	    			
+	    			for(int i=0; i <= queue.size(); i++) {
+	    				if(queue.peek().AT <= currentTime) {
+	    					readyQ.add(queue.peek());
+	    					
+	    					//here
+	    					System.out.println("Process " + queue.peek().name + " arrived at time " + currentTime);
+	    					
+	    					queue.peek().ex = 0;
+	    					queue.peek().waitStamp = currentTime;
+	    					queue.poll();
+	    				}
+	    			}
+
+	    			if(executionQ.isEmpty()) {
+	    				if(!readyQ.isEmpty()) {
+	    					executionQ.add(readyQ.peek());
+	    					if(readyQ.peek().firstResponse) {
+	    						readyQ.peek().firstResponse = false;
+	    						int responseTime = currentTime - readyQ.peek().waitStamp;
+	    						totalResponseTime += responseTime;
+	    					}
+	        				readyQ.remove(readyQ.peek());
+	    				}
+	    			}
+	    			
+	    			if(IOQ.isEmpty()) {
+	    				if(executionQ.peek().DIOT > 0) {
+	    					int i = executionQ.peek().numOfIO;
+	    					if(i == 0) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    					if(i == 1) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    				}
+	    			}
+	    			
+
+	    			totalExecutionTime++;
+		    		currentTime++;
+		    		Thread.sleep(1000);
+	    			if(IOQ.peek() != null) {
+		    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+    					IOQ.peek().numOfIO++;
+	    				if(IOQ.peek().DIOT == 0) {
+			    			if(IOQ.peek().ST > 0) {
+			    				readyQ.add(IOQ.peek());
+			    				IOQ.peek().ex = 0;
+			    				IOQ.remove();
+			    			}
+			    			else {
+			    				completedQ.add(IOQ.peek());
+			    				
+			    				
+			    				//here2
+			    				IOQ.peek().FT = currentTime;
+			    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+			    				
+			    				IOQ.remove();
+			    				int turnaroundTime = currentTime - completedQ.peek().AT;
+			    		        totalTurnaroundTime += turnaroundTime;
+			    			}
+			    		}
+	    			}
+		    		
+	    			if(executionQ.peek() != null) {
+	    				executionQ.peek().ST = executionQ.peek().ST - 1;
+		    			executionQ.peek().ex++;
+			    		if(executionQ.peek().ST == 0) {
+			    			if(executionQ.peek().DIOT == 0) {
+			    				completedQ.add(executionQ.peek());
+			    				
+			    				//here2
+			    				executionQ.peek().FT = currentTime;
+			    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+			    				
+			    				executionQ.remove();
+			    				int turnaroundTime = currentTime - completedQ.peek().AT;
+			    		        totalTurnaroundTime += turnaroundTime;
+			    			}
+			    			///////////////////////////////////////////
+			    			else if(IOQ.isEmpty()) {
+			    					int i = executionQ.peek().numOfIO;
+			    					if(i == 0) {
+			    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+			    							IOQ.add(executionQ.peek());
+					    					executionQ.remove();
+					    					}
+			    					}
+			    					if(i == 1) {
+			    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+			    							IOQ.add(executionQ.peek());
+					    					executionQ.remove();
+					    					}
+			    					}
+			    			}
+			    			else if(!IOQ.isEmpty()) {
+			    				readyQ.add(executionQ.peek());
+			    				executionQ.peek().ex = 0;
+			    				executionQ.remove();
+			    			}
+			    		}
+	    			}
+	    			
+	    		}
+	    		else {
+	    			if(executionQ.isEmpty()) {
+	    				if(!readyQ.isEmpty()) {
+	    					executionQ.add(readyQ.peek());
+	    					if(readyQ.peek().firstResponse) {
+	    						readyQ.peek().firstResponse = false;
+	    						int responseTime = currentTime - readyQ.peek().waitStamp;
+	    						totalResponseTime += responseTime;
+	    					}
+		    				readyQ.remove(readyQ.peek());
+	    				}
+	    			}
+	    			if(IOQ.isEmpty()) {
+	    				if(executionQ.peek().DIOT > 0) {
+	    					int i = executionQ.peek().numOfIO;
+	    					if(i == 0) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    					if(i == 1) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}    					
+	    				}
+	    			}
+	    			
+	    			totalExecutionTime++;
+		    		currentTime++;
+		    		Thread.sleep(1000);
+		    		if(IOQ.peek() != null) {
+		    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+    					IOQ.peek().numOfIO++;
+			    		if(IOQ.peek().DIOT == 0) {
+			    			if(IOQ.peek().ST > 0) {
+			    				readyQ.add(IOQ.peek());
+			    				IOQ.peek().ex = 0;
+			    				IOQ.remove();
+			    			}
+			    			else {
+			    				completedQ.add(IOQ.peek());
+			    				
+			    				//here2
+			    				IOQ.peek().FT = currentTime;
+			    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+
+			    				
+			    				IOQ.remove();
+			    				int turnaroundTime = currentTime - completedQ.peek().AT;
+			    		        totalTurnaroundTime += turnaroundTime;
+			    			}
+			    		}
+		    		}
+	    			
+		    		if(executionQ.peek() != null) {
+		    			executionQ.peek().ST = executionQ.peek().ST - 1;
+		    			executionQ.peek().ex++;
+			    		if(executionQ.peek().ST == 0) {
+			    			if(executionQ.peek().DIOT == 0) {
+			    				completedQ.add(executionQ.peek());
+			    				
+			    				//here2
+			    				executionQ.peek().FT = currentTime;
+			    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+
+			    				executionQ.remove();
+			    				int turnaroundTime = currentTime - completedQ.peek().AT;
+			    		        totalTurnaroundTime += turnaroundTime;
+			    			}
+			    			////////////////////////
+			    			else if(IOQ.isEmpty()) {
+		    					int i = executionQ.peek().numOfIO;
+		    					if(i == 0) {
+		    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+		    							IOQ.add(executionQ.peek());
+				    					executionQ.remove();
+				    					}
+		    					}
+		    					if(i == 1) {
+		    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+		    							IOQ.add(executionQ.peek());
+				    					executionQ.remove();
+				    					}
+		    					}
+		    			}
+		    			else if(!IOQ.isEmpty()) {
+		    				readyQ.add(executionQ.peek());
+		    				executionQ.peek().ex = 0;
+		    				executionQ.remove();
+		    			}
+			    		}
+			    		
+		    		}
+	    			
+	    		}
+	    		
+	    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+	    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+	    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+	    	    double throughput = (double) (numProcesses- queue.size()) / currentTime;
+	    	    int totalCompleted = completedQ.size();
+	    	    
+		    	if(completedQ.size() < processes.size()) {
+		    		System.out.println("FCFS:");
+		    		System.out.println("Current Time: " + currentTime + " seconds.");
+		    		System.out.println("Processes Completed: " + totalCompleted);
+		    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+		    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+		    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+		    		System.out.println("Throughput: " + throughput + " processes per second.");
+		    	}
+		    }
+		    
+	    	while(queue.isEmpty() && completedQ.size() < numProcesses) {
+	    		if(executionQ.isEmpty()) {
+    				if(!readyQ.isEmpty()) {
+    					executionQ.add(readyQ.peek());
+    					if(readyQ.peek().firstResponse) {
+    						readyQ.peek().firstResponse = false;
+    						int responseTime = currentTime - readyQ.peek().waitStamp;
+    						totalResponseTime += responseTime;
+    					}
+	    				readyQ.remove(readyQ.peek());
+    				}
+    			}
+	    		if(IOQ.isEmpty()) {
+    				if(executionQ.peek().DIOT > 0) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+    					}
+    				}
+    			}
+    			
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+	    		
+	    		if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+		    		if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+		    				readyQ.add(IOQ.peek());
+		    				IOQ.peek().ex = 0;
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+		    		
+	    		}
+    			
+	    		if(executionQ.peek() != null) {
+	    			executionQ.peek().ST = executionQ.peek().ST - 1;
+	    			executionQ.peek().ex++;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			/////////////////////////////////////
+		    			else if(IOQ.isEmpty()) {
+	    					int i = executionQ.peek().numOfIO;
+	    					if(i == 0) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    					if(i == 1) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    			}
+	    			else if(!IOQ.isEmpty()) {
+	    				readyQ.add(executionQ.peek());
+	    				executionQ.peek().ex = 0;
+	    				executionQ.remove();
+	    			}
+		    		}
+	    		}
+    			
+	    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+	    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+	    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+	    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+	    	    int totalCompleted = completedQ.size();
+
+		    	if(completedQ.size() < processes.size()) {
+		    		System.out.println("FCFS:");
+		    		System.out.println("Current Time: " + currentTime + " seconds.");
+		    		System.out.println("Processes Completed: " + totalCompleted);
+		    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+		    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+		    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+		    		System.out.println("Throughput: " + throughput + " processes per second.");
+		    	}
+		    	else {
+		    		System.out.println("FCFS:");
+		    		System.out.println("Final Time: " + currentTime + " seconds.");
+		    		System.out.println("Processes Completed: " + totalCompleted);
+		    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+		    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+		    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+		    		System.out.println("Throughput: " + throughput + " processes per second.");
+		    		
+		    		for (proc p : completedQ) {
+		    			System.out.println("Process " + p.name + " arrived at time " + p.AT + " and finished at time " + p.FT);
+		    		}
+		    		
+		    		for (proc p : processes) {
+		    		    p.ST = p.stStore;
+		    		    p.DIOT = p.diotStore;
+		    		    p.numOfIO = 0;
+		    		    p.firstResponse = true;
+		    			//System.out.println(p.name + " " + p.ST + " " + p.DIOT);
+		    		    }
+		    	}
+	    	}
+	    
+	}
+	
+	private static void roundRobin(ArrayList<proc> processes) throws InterruptedException {
+		Collections.sort(processes, ATComp);
+		
+		
+		int currentTime = 0;
+	    Queue<proc> queue = new LinkedList<>();
+	    for (proc p : processes) {
+	    	p.ex = 0;
+	    	p.stStore = p.ST;
+	    	p.diotStore = p.DIOT;
+	    	queue.offer(p);
+	    }
+		
+	    Queue<proc> readyQ = new LinkedList<>();
+	    Queue<proc> IOQ = new LinkedList<>();
+	    Queue<proc> completedQ = new LinkedList<>();
+	    Queue<proc> executionQ = new LinkedList<>();
+	    
+	    int totalExecutionTime = 0;
+	    int totalTurnaroundTime = 0;
+	    int totalResponseTime = 0;
+	    int numProcesses = processes.size();
+	    
+	    while (!queue.isEmpty()) {    		
+	    	
+    		if(queue.peek().AT <= currentTime) {
+    		
+	    	for(int i=0; i <= queue.size(); i++) {
+				if(queue.peek().AT <= currentTime) {
+					readyQ.add(queue.peek());
+					
+					//here
+					System.out.println("Process " + queue.peek().name + " arrived at time " + currentTime);
+					
+					queue.peek().ex = 0;
+					queue.peek().waitStamp = currentTime;
+					queue.poll();
+				}
+			}
+    			
+			if(executionQ.isEmpty()) {
+				if(!readyQ.isEmpty()) {
+					executionQ.add(readyQ.peek());
+					if(readyQ.peek().firstResponse) {
+						readyQ.peek().firstResponse = false;
+						int responseTime = currentTime - readyQ.peek().waitStamp;
+						totalResponseTime += responseTime;
+					}
+    				readyQ.remove(readyQ.peek());
+				}
+			}
+			
+			if(IOQ.isEmpty()) {
+				if(executionQ.peek().DIOT > 0) {
+					int i = executionQ.peek().numOfIO;
+					if(i == 0) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+					if(i == 1) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+				}
+			}
+
+
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+    			if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+    				if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+		    				readyQ.add(IOQ.peek());
+		    				IOQ.peek().ex = 0;
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+		    				
+		    				
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+    			}
+	    		
+    			if(executionQ.peek() != null) {
+    				executionQ.peek().ST = executionQ.peek().ST - 1;
+	    			executionQ.peek().ex++;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+
+		    				
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			else if(IOQ.isEmpty()) {
+	    					int i = executionQ.peek().numOfIO;
+	    					if(i == 0) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    					if(i == 1) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    			}
+		    			else if(!IOQ.isEmpty()) {
+		    				readyQ.add(executionQ.peek());
+		    				executionQ.peek().ex = 0;
+		    				executionQ.remove();
+		    			}
+		    		}
+    			}
+    			
+    			if(executionQ.peek() != null) {
+    				readyQ.add(executionQ.peek());
+    				executionQ.peek().ex = 0;
+    				executionQ.remove();
+    			}
+    		}
+    		else {
+    			if(executionQ.isEmpty()) {
+    				if(!readyQ.isEmpty()) {
+    					executionQ.add(readyQ.peek());
+    					if(readyQ.peek().firstResponse) {
+    						readyQ.peek().firstResponse = false;
+    						int responseTime = currentTime - readyQ.peek().waitStamp;
+    						totalResponseTime += responseTime;
+    					}
+        				readyQ.remove(readyQ.peek());
+    				}
+    			}
+    			
+    			if(IOQ.isEmpty()) {
+    				if(executionQ.peek().DIOT > 0) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+    					}
+    				}
+    			}
+    			
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+	    		if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+		    		if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+		    				readyQ.add(IOQ.peek());
+		    				IOQ.peek().ex = 0;
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+		    				
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+	    		}
+	    		
+    			if(executionQ.peek() != null) {
+    				executionQ.peek().ST = executionQ.peek().ST - 1;
+	    			executionQ.peek().ex++;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+		    				
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			else if(IOQ.isEmpty()) {
+	    					int i = executionQ.peek().numOfIO;
+	    					if(i == 0) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    					if(i == 1) {
+	    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+	    							IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+	    					}
+	    			}
+		    			else if(!IOQ.isEmpty()) {
+		    				readyQ.add(executionQ.peek());
+		    				executionQ.peek().ex = 0;
+		    				executionQ.remove();
+		    			}
+		    		}
+    			}
+	    		
+	    		if(executionQ.peek() != null) {
+    				readyQ.add(executionQ.peek());
+    				executionQ.peek().ex = 0;
+    				//////////////////////////////////
+    				executionQ.remove();
+    			}
+    			
+    		}
+    		
+    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+    	    int totalCompleted = completedQ.size();
+    	    
+	    	if(completedQ.size() < processes.size()) {
+	    		System.out.println("Round Robin:");
+	    		System.out.println("Current Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    	}
+	    }
+	    
+    	while(queue.isEmpty() && completedQ.size() < numProcesses) {
+			if(executionQ.isEmpty()) {
+				if(!readyQ.isEmpty()) {
+					executionQ.add(readyQ.peek());
+					if(readyQ.peek().firstResponse) {
+						readyQ.peek().firstResponse = false;
+						int responseTime = currentTime - readyQ.peek().waitStamp;
+						totalResponseTime += responseTime;
+					}
+    				readyQ.remove(readyQ.peek());
+				}
+			}
+			
+			if(IOQ.isEmpty()) {
+				if(executionQ.peek().DIOT > 0) {
+					int i = executionQ.peek().numOfIO;
+					if(i == 0) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+					if(i == 1) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+				}
+			}
+			
+			totalExecutionTime++;
+    		currentTime++;
+    		Thread.sleep(1000);
+    		
+    		if(IOQ.peek() != null) {
+    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+				IOQ.peek().numOfIO++;
+	    		if(IOQ.peek().DIOT == 0) {
+	    			if(IOQ.peek().ST > 0) {
+	    				readyQ.add(IOQ.peek());
+	    				IOQ.peek().ex = 0;
+	    				IOQ.remove();
+	    			}
+	    			else {
+	    				completedQ.add(IOQ.peek());
+	    				
+	    				
+	    				//here2
+	    				IOQ.peek().FT = currentTime;
+	    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+	    				
+	    				IOQ.remove();
+	    				int turnaroundTime = currentTime - completedQ.peek().AT;
+	    		        totalTurnaroundTime += turnaroundTime;
+	    			}
+	    		}
+	    		
+    		}
+    		
+			if(executionQ.peek() != null) {
+				executionQ.peek().ST = executionQ.peek().ST - 1;
+    			executionQ.peek().ex++;
+	    		if(executionQ.peek().ST == 0) {
+	    			if(executionQ.peek().DIOT == 0) {
+	    				completedQ.add(executionQ.peek());
+	    				
+	    				
+	    				//here2
+	    				executionQ.peek().FT = currentTime;
+	    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+	    				
+	    				
+	    				executionQ.remove();
+	    				int turnaroundTime = currentTime - completedQ.peek().AT;
+	    		        totalTurnaroundTime += turnaroundTime;
+	    			}
+	    			else if(IOQ.isEmpty()) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+    					}
+    			}
+	    			else if(!IOQ.isEmpty()) {
+	    				readyQ.add(executionQ.peek());
+	    				executionQ.peek().ex = 0;
+	    				executionQ.remove();
+	    			}
+	    		}
+			}
+    		
+    		if(executionQ.peek() != null) {
+				readyQ.add(executionQ.peek());
+				executionQ.peek().ex = 0;
+				executionQ.remove();
+			}
+			
+    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+    	    int totalCompleted = completedQ.size();
+
+	    	if(completedQ.size() < processes.size()) {
+	    		System.out.println("Round Robin:");
+	    		System.out.println("Current Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    	}
+	    	else {
+	    		System.out.println("Round Robin:");
+	    		System.out.println("Final Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    		
+	    		for (proc p : completedQ) {
+	    			System.out.println("Process " + p.name + " arrived at time " + p.AT + " and finished at time " + p.FT);
+	    		}
+	    		
+	    		for (proc p : processes) {
+	    		    p.ST = p.stStore;
+	    		    p.DIOT = p.diotStore;
+	    		    p.numOfIO = 0;
+	    		    p.firstResponse = true;
+	    			//System.out.println(p.name + " " + p.ST + " " + p.DIOT);
+	    		    }
+	    	}
+    	}
+    
+	    
+	}
+	
+	private static void srt(ArrayList<proc> processes) throws InterruptedException {
+		Collections.sort(processes, ATComp);
+		
+		
+		int currentTime = 0;
+	    Queue<proc> queue = new LinkedList<>();
+	    for (proc p : processes) {
+	    	p.stStore = p.ST;
+	    	p.diotStore = p.DIOT;
+	      queue.offer(p);
+	    }
+		
+	    Queue<proc> readyQ = new LinkedList<>();
+	    Queue<proc> IOQ = new LinkedList<>();
+	    Queue<proc> completedQ = new LinkedList<>();
+	    Queue<proc> executionQ = new LinkedList<>();
+	    
+	    int totalExecutionTime = 0;
+	    int totalTurnaroundTime = 0;
+	    int totalResponseTime = 0;
+	    int numProcesses = processes.size();
+	    
+	    while (!queue.isEmpty()) {    		
+	    	
+    		if(queue.peek().AT <= currentTime) {
+    		
+    	    	for(int i=0; i <= queue.size(); i++) {
+    				if(queue.peek().AT <= currentTime) {
+    					readyQ.add(queue.peek());
+    					
+    					//here
+    					System.out.println("Process " + queue.peek().name + " arrived at time " + currentTime);
+    					
+    					
+    					queue.peek().waitStamp = currentTime;
+	        			sortSRT(readyQ);
+    					queue.poll();
+    				}
+    			}
+        			
+    			if(executionQ.isEmpty()) {
+    				if(!readyQ.isEmpty()) {
+    					executionQ.add(readyQ.peek());
+    					if(readyQ.peek().firstResponse) {
+    						readyQ.peek().firstResponse = false;
+    						int responseTime = currentTime - readyQ.peek().waitStamp;
+    						totalResponseTime += responseTime;
+    					}
+        				readyQ.remove(readyQ.peek());
+    				}
+    			}
+    			
+    			if(IOQ.isEmpty()) {
+    				if(executionQ.peek().DIOT > 0) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    				}
+    			}
+    			
+
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+    			if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+    				if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+		    				readyQ.add(IOQ.peek());
+		        			sortSRT(readyQ);
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+		    				
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+    			}
+	    		
+    			if(executionQ.peek() != null) {
+    				executionQ.peek().ST = executionQ.peek().ST - 1;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+		    				
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			else if(IOQ.isEmpty()) {
+							int i = executionQ.peek().numOfIO;
+							if(i == 0) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+							}
+							if(i == 1) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+							}
+					}
+		    			else if(!IOQ.isEmpty()) {
+		    				readyQ.add(executionQ.peek());
+		        			sortSRT(readyQ);
+		    				executionQ.remove();
+		    			}
+		    		}
+    			}
+    			
+    			if(executionQ.peek() != null) {
+    				readyQ.add(executionQ.peek());
+        			sortSRT(readyQ);
+    				executionQ.remove();
+    			}
+    		}
+    		else {  				
+    			if(executionQ.isEmpty()) {
+    				if(!readyQ.isEmpty()) {
+    					executionQ.add(readyQ.peek());
+    					if(readyQ.peek().firstResponse) {
+    						readyQ.peek().firstResponse = false;
+    						int responseTime = currentTime - readyQ.peek().waitStamp;
+    						totalResponseTime += responseTime;
+    					}
+        				readyQ.remove(readyQ.peek());
+    				}
+    			}
+    			
+    			if(IOQ.isEmpty()) {
+    				if(executionQ.peek().DIOT > 0) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    				}
+    			}
+
+    			
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+	    		if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+		    		if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+		    				readyQ.add(IOQ.peek());
+		        			sortSRT(readyQ);
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+		    				
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+	    		}
+    			
+	    		if(executionQ.peek() != null) {
+	    			executionQ.peek().ST = executionQ.peek().ST - 1;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+		    				
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			else if(IOQ.isEmpty()) {
+							int i = executionQ.peek().numOfIO;
+							if(i == 0) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+							}
+							if(i == 1) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+							}
+					}
+		    			else if(!IOQ.isEmpty()) {
+		    				readyQ.add(executionQ.peek());
+		        			sortSRT(readyQ);
+		    				executionQ.remove();
+		    			}
+		    		}
+	    		}
+	    		
+	    		if(executionQ.peek() != null) {
+    				readyQ.add(executionQ.peek());
+        			sortSRT(readyQ);
+    				executionQ.remove();
+    			}
+    			
+    		}
+    		
+    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+    	    int totalCompleted = completedQ.size();
+    	    
+	    	if(completedQ.size() < processes.size()) {
+	    		System.out.println("SRT:");
+	    		System.out.println("Current Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    	}
+	    }
+	    
+    	while(queue.isEmpty() && completedQ.size() < numProcesses) {	
+			if(executionQ.isEmpty()) {
+				if(!readyQ.isEmpty()) {
+					executionQ.add(readyQ.peek());
+					if(readyQ.peek().firstResponse) {
+						readyQ.peek().firstResponse = false;
+						int responseTime = currentTime - readyQ.peek().waitStamp;
+						totalResponseTime += responseTime;
+					}
+    				readyQ.remove(readyQ.peek());
+				}
+			}
+			
+			if(IOQ.isEmpty()) {
+				if(executionQ.peek().DIOT > 0) {
+					int i = executionQ.peek().numOfIO;
+					if(i == 0) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+					if(i == 1) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+				}
+			}
+
+			
+			totalExecutionTime++;
+    		currentTime++;
+    		Thread.sleep(1000);
+    		
+    		if(IOQ.peek() != null) {
+    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+				IOQ.peek().numOfIO++;
+	    		if(IOQ.peek().DIOT == 0) {
+	    			if(IOQ.peek().ST > 0) {
+	    				readyQ.add(IOQ.peek());
+	        			sortSRT(readyQ);
+	    				IOQ.remove();
+	    			}
+	    			else {
+	    				completedQ.add(IOQ.peek());
+	    				
+	    				
+	    				//here2
+	    				IOQ.peek().FT = currentTime;
+	    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+	    				
+	    				IOQ.remove();
+	    				int turnaroundTime = currentTime - completedQ.peek().AT;
+	    		        totalTurnaroundTime += turnaroundTime;
+	    			}
+	    		}
+	    		
+    		}
+			
+    		if(executionQ.peek() != null) {
+    			executionQ.peek().ST = executionQ.peek().ST - 1;
+	    		if(executionQ.peek().ST == 0) {
+	    			if(executionQ.peek().DIOT == 0) {
+	    				completedQ.add(executionQ.peek());
+	    				
+	    				
+	    				//here2
+	    				executionQ.peek().FT = currentTime;
+	    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+	    				
+	    				executionQ.remove();
+	    				int turnaroundTime = currentTime - completedQ.peek().AT;
+	    		        totalTurnaroundTime += turnaroundTime;
+	    			}
+	    			else if(IOQ.isEmpty()) {
+						int i = executionQ.peek().numOfIO;
+						if(i == 0) {
+							if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+								IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+						}
+						if(i == 1) {
+							if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+								IOQ.add(executionQ.peek());
+		    					executionQ.remove();
+		    					}
+						}
+				}
+	    			else if(!IOQ.isEmpty()) {
+	    				readyQ.add(executionQ.peek());
+	        			sortSRT(readyQ);
+	    				executionQ.remove();
+	    			}
+	    		}
+    		}
+    		
+    		if(executionQ.peek() != null) {
+				readyQ.add(executionQ.peek());
+    			sortSRT(readyQ);
+				executionQ.remove();
+			}
+			
+    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+    	    int totalCompleted = completedQ.size();
+
+	    	if(completedQ.size() < processes.size()) {
+	    		System.out.println("SRT:");
+	    		System.out.println("Current Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    	}
+	    	else {
+	    		System.out.println("SRT:");
+	    		System.out.println("Final Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    		
+	    		for (proc p : completedQ) {
+	    			System.out.println("Process " + p.name + " arrived at time " + p.AT + " and finished at time " + p.FT);
+	    		}
+	    		
+	    		for (proc p : processes) {
+	    		    p.ST = p.stStore;
+	    		    p.DIOT = p.diotStore;
+	    		    p.numOfIO = 0;
+	    		    p.firstResponse = true;
+	    			//System.out.println(p.name + " " + p.ST + " " + p.DIOT);
+	    		    }
+	    	}
+    	}
+	}
+	
+	private static void hrrn(ArrayList<proc> processes) throws InterruptedException {
+		Collections.sort(processes, ATComp);
+		
+		
+		int currentTime = 0;
+	    Queue<proc> queue = new LinkedList<>();
+	    for (proc p : processes) {
+	    	p.ex = 0;
+	    	p.stStore = p.ST;
+	    	p.diotStore = p.DIOT;
+	    	queue.offer(p);
+	    }
+		
+	    Queue<proc> readyQ = new LinkedList<>();
+	    Queue<proc> IOQ = new LinkedList<>();
+	    Queue<proc> completedQ = new LinkedList<>();
+	    Queue<proc> executionQ = new LinkedList<>();
+	    
+	    int totalExecutionTime = 0;
+	    int totalTurnaroundTime = 0;
+	    int totalResponseTime = 0;
+	    int numProcesses = processes.size();
+	    
+	    while (!queue.isEmpty()) {    		
+	    	
+    		if(queue.peek().AT <= currentTime) {
+    	    	for(int i=0; i <= queue.size(); i++) {
+    				if(queue.peek().AT <= currentTime) {
+    					readyQ.add(queue.peek());
+    					
+    					//here
+    					System.out.println("Process " + queue.peek().name + " arrived at time " + currentTime);
+    					
+    					queue.peek().waitStamp = currentTime;
+	        			sortHrrn(readyQ, currentTime);
+    					queue.poll();
+    				}
+    			}
+        			
+    			if(executionQ.isEmpty()) {
+    				if(!readyQ.isEmpty()) {
+    					executionQ.add(readyQ.peek());
+    					if(readyQ.peek().firstResponse) {
+    						readyQ.peek().firstResponse = false;
+    						int responseTime = currentTime - readyQ.peek().waitStamp;
+    						totalResponseTime += responseTime;
+    					}
+    					readyQ.peek().waitStamp = currentTime;
+        				readyQ.remove(readyQ.peek());
+    				}
+    			}
+    			
+    			if(IOQ.isEmpty()) {
+    				if(executionQ.peek().DIOT > 0) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    				}
+    			}
+
+
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+    			if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+    				if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+		    				readyQ.add(IOQ.peek());
+		        			sortHrrn(readyQ, currentTime);
+	    					IOQ.peek().waitStamp = currentTime;
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+		    				
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+    			}
+	    		
+    			if(executionQ.peek() != null) {
+    				executionQ.peek().ST = executionQ.peek().ST - 1;
+        			executionQ.peek().ex = executionQ.peek().ex + 1;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+		    				
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			else if(IOQ.isEmpty()) {
+							int i = executionQ.peek().numOfIO;
+							if(i == 0) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									IOQ.add(executionQ.peek());
+									executionQ.peek().waitStamp = currentTime;
+			    					executionQ.remove();
+			    					}
+							}
+							if(i == 1) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									IOQ.add(executionQ.peek());
+									executionQ.peek().waitStamp = currentTime;
+			    					executionQ.remove();
+			    					}
+							}
+					}
+		    			else if(!IOQ.isEmpty()) {
+		    				readyQ.add(executionQ.peek());
+		        			sortHrrn(readyQ, currentTime);
+							executionQ.peek().waitStamp = currentTime;
+		    				executionQ.remove();
+		    			}
+		    		}
+    			}
+    			
+    			if(executionQ.peek() != null) {
+    				readyQ.add(executionQ.peek());
+        			sortHrrn(readyQ, currentTime);
+					executionQ.peek().waitStamp = currentTime;
+    				executionQ.remove();
+    			}
+    		}
+    		else {
+    			if(executionQ.isEmpty()) {
+    				if(!readyQ.isEmpty()) {
+    					executionQ.add(readyQ.peek());
+    					if(readyQ.peek().firstResponse) {
+    						readyQ.peek().firstResponse = false;
+    						int responseTime = currentTime - readyQ.peek().waitStamp;
+    						totalResponseTime += responseTime;
+    					}
+						readyQ.peek().waitStamp = currentTime;
+        				readyQ.remove(readyQ.peek());
+    				}
+    			}
+    			
+    			if(IOQ.isEmpty()) {
+    				if(executionQ.peek().DIOT > 0) {
+    					int i = executionQ.peek().numOfIO;
+    					if(i == 0) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    					if(i == 1) {
+    						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+    							IOQ.add(executionQ.peek());
+    	    					executionQ.remove();
+    	    					}
+    					}
+    				}
+    			}
+    			
+    			totalExecutionTime++;
+	    		currentTime++;
+	    		Thread.sleep(1000);
+	    		if(IOQ.peek() != null) {
+	    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+					IOQ.peek().numOfIO++;
+		    		if(IOQ.peek().DIOT == 0) {
+		    			if(IOQ.peek().ST > 0) {
+	    					IOQ.peek().waitStamp = currentTime;
+		    				readyQ.add(IOQ.peek());
+		        			sortHrrn(readyQ, currentTime);
+		    				IOQ.remove();
+		    			}
+		    			else {
+		    				completedQ.add(IOQ.peek());
+		    				
+		    				
+		    				//here2
+		    				IOQ.peek().FT = currentTime;
+		    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+		    				
+		    				IOQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    		}
+	    		}
+    			
+	    		if(executionQ.peek() != null) {
+	    			executionQ.peek().ST = executionQ.peek().ST - 1;
+	    			executionQ.peek().ex = executionQ.peek().ex + 1;
+		    		if(executionQ.peek().ST == 0) {
+		    			if(executionQ.peek().DIOT == 0) {
+		    				completedQ.add(executionQ.peek());
+		    				
+		    				
+		    				//here2
+		    				executionQ.peek().FT = currentTime;
+		    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+		    				
+		    				executionQ.remove();
+		    				int turnaroundTime = currentTime - completedQ.peek().AT;
+		    		        totalTurnaroundTime += turnaroundTime;
+		    			}
+		    			else if(IOQ.isEmpty()) {
+							int i = executionQ.peek().numOfIO;
+							if(i == 0) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									executionQ.peek().waitStamp = currentTime;
+									IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+							}
+							if(i == 1) {
+								if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+									executionQ.peek().waitStamp = currentTime;
+									IOQ.add(executionQ.peek());
+			    					executionQ.remove();
+			    					}
+							}
+					}
+		    			else if(!IOQ.isEmpty()) {
+							executionQ.peek().waitStamp = currentTime;
+		    				readyQ.add(executionQ.peek());
+		        			sortHrrn(readyQ, currentTime);
+		    				executionQ.remove();
+		    			}
+		    		}
+		    		
+	    		}
+	    		
+	    		if(executionQ.peek() != null) {
+					executionQ.peek().waitStamp = currentTime;
+    				readyQ.add(executionQ.peek());
+        			sortHrrn(readyQ, currentTime);
+    				executionQ.remove();
+    			}
+    			
+    		}
+    		
+    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+    	    int totalCompleted = completedQ.size();
+    	    
+	    	if(completedQ.size() < processes.size()) {
+	    		System.out.println("HRRN:");
+	    		System.out.println("Current Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    	}
+	    }
+	    
+    	while(queue.isEmpty() && completedQ.size() < numProcesses) {
+			if(executionQ.isEmpty()) {
+				if(!readyQ.isEmpty()) {
+					executionQ.add(readyQ.peek());
+					if(readyQ.peek().firstResponse) {
+						readyQ.peek().firstResponse = false;
+						int responseTime = currentTime - readyQ.peek().waitStamp;
+						totalResponseTime += responseTime;
+					}
+					readyQ.peek().waitStamp = currentTime;
+    				readyQ.remove(readyQ.peek());
+				}
+			}
+			
+			if(IOQ.isEmpty()) {
+				if(executionQ.peek().DIOT > 0) {
+					int i = executionQ.peek().numOfIO;
+					if(i == 0) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+					if(i == 1) {
+						if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+							IOQ.add(executionQ.peek());
+	    					executionQ.remove();
+	    					}
+					}
+				}
+			}
+
+			
+			totalExecutionTime++;
+    		currentTime++;
+    		Thread.sleep(1000);
+    		
+    		if(IOQ.peek() != null) {
+    			IOQ.peek().DIOT = IOQ.peek().DIOT - 1;
+				IOQ.peek().numOfIO++;
+	    		if(IOQ.peek().DIOT == 0) {
+	    			if(IOQ.peek().ST > 0) {
+						IOQ.peek().waitStamp = currentTime;
+	    				readyQ.add(IOQ.peek());
+	        			sortHrrn(readyQ, currentTime);
+	    				IOQ.remove();
+	    			}
+	    			else {
+	    				completedQ.add(IOQ.peek());
+	    				
+	    				
+	    				//here2
+	    				IOQ.peek().FT = currentTime;
+	    				System.out.println("Process " + IOQ.peek().name + " finished at " + currentTime);
+	    				
+	    				IOQ.remove();
+	    				int turnaroundTime = currentTime - completedQ.peek().AT;
+	    		        totalTurnaroundTime += turnaroundTime;
+	    			}
+	    		}
+	    		
+    		}
+			
+    		if(executionQ.peek() != null) {
+    			executionQ.peek().ST = executionQ.peek().ST - 1;
+    			executionQ.peek().ex = executionQ.peek().ex + 1;
+	    		if(executionQ.peek().ST == 0) {
+	    			if(executionQ.peek().DIOT == 0) {
+	    				completedQ.add(executionQ.peek());
+	    				
+	    				
+	    				//here2
+	    				executionQ.peek().FT = currentTime;
+	    				System.out.println("Process " + executionQ.peek().name + " finished at " + currentTime);
+	    				
+	    				
+	    				executionQ.remove();
+	    				int turnaroundTime = currentTime - completedQ.peek().AT;
+	    		        totalTurnaroundTime += turnaroundTime;
+	    			}
+	    			else if(IOQ.isEmpty()) {
+						int i = executionQ.peek().numOfIO;
+						if(i == 0) {
+							if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+								IOQ.add(executionQ.peek());
+								executionQ.peek().waitStamp = currentTime;
+		    					executionQ.remove();
+		    					}
+						}
+						if(i == 1) {
+							if((executionQ.peek().stStore - executionQ.peek().ST) >= executionQ.peek().DIOA[i]) {
+								IOQ.add(executionQ.peek());
+								executionQ.peek().waitStamp = currentTime;
+		    					executionQ.remove();
+		    					}
+						}
+				}
+	    			else if(!IOQ.isEmpty()) {
+	    				readyQ.add(executionQ.peek());
+	        			sortHrrn(readyQ, currentTime);
+						executionQ.peek().waitStamp = currentTime;
+	    				executionQ.remove();
+	    			}
+	    		}
+    		}
+    		
+    		if(executionQ.peek() != null) {
+				executionQ.peek().waitStamp = currentTime;
+				readyQ.add(executionQ.peek());
+    			sortHrrn(readyQ, currentTime);
+				executionQ.remove();
+			}
+			
+    		double avgResponseTime = (double) totalResponseTime / (numProcesses - queue.size());
+    		double avgTurnaroundTime = (double) totalTurnaroundTime / (numProcesses - queue.size());
+    		double avgRatio = (double) totalTurnaroundTime / totalExecutionTime;
+    	    double throughput = (double) (numProcesses - queue.size()) / currentTime;
+    	    int totalCompleted = completedQ.size();
+
+	    	if(completedQ.size() < processes.size()) {
+	    		System.out.println("HRRN:");
+	    		System.out.println("Current Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    	}
+	    	else {
+	    		System.out.println("HRRN:");
+	    		System.out.println("Final Time: " + currentTime + " seconds.");
+	    		System.out.println("Processes Completed: " + totalCompleted);
+	    		System.out.println("Average Response Time: " + avgResponseTime + " seconds.");
+	    		System.out.println("Average Turnaround Time: " + avgTurnaroundTime + " seconds.");
+	    		System.out.println("Ratio of Turnaround Time to Service Time: " + avgRatio);
+	    		System.out.println("Throughput: " + throughput + " processes per second.");
+	    		
+	    		for (proc p : completedQ) {
+	    			System.out.println("Process " + p.name + " arrived at time " + p.AT + " and finished at time " + p.FT);
+	    		}
+	    		
+	    		for (proc p : processes) {
+	    		    p.ST = p.stStore;
+	    		    p.DIOT = p.diotStore;
+	    		    p.numOfIO = 0;
+	    		    p.firstResponse = true;
+	    			//System.out.println(p.name + " " + p.ST + " " + p.DIOT + " " + p.ex);
+	    		    }
+	    	}
+    	}
+	    
+	}
+
+	public static void main(String[] args) throws InterruptedException {
+		proc processA = new proc("A", 0, 6, 1, new int[] {3});
+		proc processB = new proc("B", 2, 12, 2, new int[] {4, 8});
+		proc processC = new proc("C", 4, 8, 1, new int[] {4});
+		proc processD = new proc("D", 6, 10, 0, null);
+		proc processE = new proc("E", 8, 4, 2, new int[] {1,3});
+		ArrayList<proc> processes = new ArrayList<>();
+		processes.add(processA);
+		processes.add(processB);
+		processes.add(processC);
+		processes.add(processD);
+		processes.add(processE);
+		
+		fcfs(new ArrayList<>(processes));
+		roundRobin(new ArrayList<>(processes));
+		srt(new ArrayList<>(processes));
+		hrrn(new ArrayList<>(processes));
+		
+		
+		int fST = getRandNum(1, 20);
+		int gST = getRandNum(1, 20);
+		int hST = getRandNum(1, 20);
+		int iST = getRandNum(1, 20);
+		int jST = getRandNum(1, 20);
+		int kST = getRandNum(1, 20);
+		int lST = getRandNum(1, 20);
+		int mST = getRandNum(1, 20);
+		int nST = getRandNum(1, 20);
+		int oST = getRandNum(1, 20);
+		int pST = getRandNum(1, 20);
+		int qST = getRandNum(1, 20);
+		int rST = getRandNum(1, 20);
+		int sST = getRandNum(1, 20);
+		int tST = getRandNum(1, 20);
+		int uST = getRandNum(1, 20);
+		int vST = getRandNum(1, 20);
+
+		
+		proc processF = new proc("F", getRandNum(0, 20), fST, getRandNum(0, 2), new int[] {getRandNum(0, fST),getRandNum(0, fST)});
+		proc processG = new proc("G", getRandNum(0, 20), gST, getRandNum(0, 2), new int[] {getRandNum(0, gST),getRandNum(0, gST)});
+		proc processH = new proc("H", getRandNum(0, 20), hST, getRandNum(0, 2), new int[] {getRandNum(0, hST),getRandNum(0, hST)});
+		proc processI = new proc("I", getRandNum(0, 20), iST, getRandNum(0, 2), new int[] {getRandNum(0, iST),getRandNum(0, iST)});
+		proc processJ = new proc("J", getRandNum(0, 20), jST, getRandNum(0, 2), new int[] {getRandNum(0, jST),getRandNum(0, jST)});
+		proc processK = new proc("K", getRandNum(0, 20), kST, getRandNum(0, 2), new int[] {getRandNum(0, kST),getRandNum(0, kST)});
+		proc processL = new proc("L", getRandNum(0, 20), lST, getRandNum(0, 2), new int[] {getRandNum(0, lST),getRandNum(0, lST)});
+		proc processM = new proc("M", getRandNum(0, 20), mST, getRandNum(0, 2), new int[] {getRandNum(0, mST),getRandNum(0, mST)});
+		proc processN = new proc("N", getRandNum(0, 20), nST, getRandNum(0, 2), new int[] {getRandNum(0, nST),getRandNum(0, nST)});
+		proc processO = new proc("O", getRandNum(0, 20), oST, getRandNum(0, 2), new int[] {getRandNum(0, oST),getRandNum(0, oST)});
+		proc processP = new proc("P", getRandNum(0, 20), pST, getRandNum(0, 2), new int[] {getRandNum(0, pST),getRandNum(0, pST)});
+		proc processQ = new proc("Q", getRandNum(0, 20), qST, getRandNum(0, 2), new int[] {getRandNum(0, qST),getRandNum(0, qST)});
+		proc processR = new proc("R", getRandNum(0, 20), rST, getRandNum(0, 2), new int[] {getRandNum(0, rST),getRandNum(0, rST)});
+		proc processS = new proc("S", getRandNum(0, 20), sST, getRandNum(0, 2), new int[] {getRandNum(0, sST),getRandNum(0, sST)});
+		proc processT = new proc("T", getRandNum(0, 20), tST, getRandNum(0, 2), new int[] {getRandNum(0, tST),getRandNum(0, tST)});
+		proc processU = new proc("U", getRandNum(0, 20), uST, getRandNum(0, 2), new int[] {getRandNum(0, uST),getRandNum(0, uST)});
+		proc processV = new proc("V", getRandNum(0, 20), vST, getRandNum(0, 2), new int[] {getRandNum(0, vST),getRandNum(0, vST)});
+		
+		processes.add(processF);
+		processes.add(processG);
+		processes.add(processH);
+		processes.add(processI);
+		processes.add(processJ);
+		processes.add(processK);
+		processes.add(processL);
+		processes.add(processM);
+		processes.add(processN);
+		processes.add(processO);
+		processes.add(processP);
+		processes.add(processQ);
+		processes.add(processR);
+		processes.add(processS);
+		processes.add(processT);
+		processes.add(processU);
+		processes.add(processV);
+		
+		
+
+		
+		fcfs(new ArrayList<>(processes));
+		roundRobin(new ArrayList<>(processes));
+		srt(new ArrayList<>(processes));
+		hrrn(new ArrayList<>(processes));
+		
+
+	}
+
+}
